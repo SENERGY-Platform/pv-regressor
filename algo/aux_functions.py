@@ -29,7 +29,7 @@ def preprocess_weather_data(new_weather_data, weather_time, observer):
     # (min=0, max=100) is easy. For temperature we choose min=-10, max=30 and for precipitation amount: min=0, max=10.
 
     aux_list = [[min_seconds_to_sunrise_or_sunset, data_point['instant_air_temperature'], data_point['instant_relative_humidity'],
-                 data_point['direct_radiation'], data_point['1_hours_precipitation_amount'],
+                 data_point['instant_ultraviolet_index_clear_sky'], data_point['1_hours_precipitation_amount'],
                  data_point['instant_cloud_area_fraction']] for data_point in new_weather_data]
 
     weather_array = np.array(aux_list)
