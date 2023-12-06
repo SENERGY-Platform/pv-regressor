@@ -1,0 +1,10 @@
+{
+  "topic": "test_topic",
+  "key": "test_operator",
+  "value": {
+    "pipeline_id": "test_pipeline",
+    "operator_id": "test_operator",
+    "analytics": null,
+    "time": null
+  }
+}

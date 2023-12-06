@@ -1,0 +1,18 @@
+[
+  {
+    "device_id": "device:1",
+    "service_id": "service:1",
+    "data": {
+        "val_a": 1,
+        "time": "2022-04-01T06:00:00.030Z"
+      }
+  },
+  {
+    "import_id": "import:1",
+    "data": {
+      "val_a": 2,
+      "val_b": 3,
+      "time": "2022-04-01T06:10:00.030Z"
+    }
+  }
+]

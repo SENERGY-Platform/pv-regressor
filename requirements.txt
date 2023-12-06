@@ -1,0 +1,13 @@
+git+https://github.com/SENERGY-Platform/message-filter-lib.git@0.8.2
+git+https://github.com/y-du/simple-env-var-manager.git@2.3.0
+git+https://github.com/y-du/simple-struct.git@0.2.0
+git+https://github.com/SENERGY-Platform/concurrency-watchdog.git@0.1.1
+confluent_kafka<2
+pandas<2
+kazoo<3
+astral
+datetime
+pytz
+matplotlib
+tzdata
+timezonefinder

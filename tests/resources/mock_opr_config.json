@@ -1,0 +1,63 @@
+{
+  "config": {
+    "energy_src_id": "device:1",
+    "weather_src_id": "import:1",
+    "selectors": "[{\"name\":\"func_1\",\"args\":[\"a\",\"timestamp\"]},{\"name\":\"func_2\",\"args\":[\"a\",\"b\",\"timestamp\"]}]",
+    "logger_level": "debug"
+  },
+  "inputTopics": [
+    {
+      "name": "service_1",
+      "filterType": "DeviceId",
+      "filterValue": "device:1",
+      "mappings": [
+        {
+          "dest": "a",
+          "source": "data.val_a"
+        },
+        {
+          "dest": "timestamp",
+          "source": "data.time"
+        }
+      ]
+    },
+    {
+      "name": "import_1",
+      "filterType": "ImportId",
+      "filterValue": "import:1",
+      "mappings": [
+        {
+          "dest": "a",
+          "source": "data.val_a"
+        },
+        {
+          "dest": "b",
+          "source": "data.val_b"
+        },
+        {
+          "dest": "timestamp",
+          "source": "data.time"
+        }
+      ]
+    },
+    {
+      "name": "operator_1",
+      "filterType": "OperatorId",
+      "filterValue": "pipe1:operator1",
+      "mappings": [
+        {
+          "dest": "a",
+          "source": "data.val_a"
+        },
+        {
+          "dest": "b",
+          "source": "data.val_b"
+        },
+        {
+          "dest": "timestamp",
+          "source": "data.time"
+        }
+      ]
+    }
+  ]
+}
