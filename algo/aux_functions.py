@@ -43,7 +43,7 @@ def batch_standardize(array):
         return (array-np.mean(array, axis=0))/np.std(array, axis=0)
 
 def standardize_sample(array, mean, std):
-    if std.all()==False:
+    if np.array(std).all()==False:
         return array
     else:
         return (array-mean)/std
