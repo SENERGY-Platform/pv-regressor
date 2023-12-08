@@ -30,7 +30,7 @@ from sklearn.exceptions import NotFittedError
 
 
 class Operator(util.OperatorBase):
-    def __init__(self, lat, long, data_path="./data"):
+    def __init__(self, lat, long, data_path="/opt/data"):
         if not os.path.exists(data_path):
             os.mkdir(data_path)
 

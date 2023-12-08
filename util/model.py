@@ -32,7 +32,7 @@ class Selector(simple_struct.Structure):
 
 class Config(simple_struct.Structure):
     logger_level = "warning"
-    data_path = "./data"
+    data_path = "/opt/data"
     selectors: typing.List[Selector] = None
     lat = 51.34
     long = 12.38
