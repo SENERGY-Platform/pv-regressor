@@ -37,7 +37,10 @@ def preprocess_weather_data(new_weather_data, weather_time, observer):
     return weather_array
 
 def batch_standardize(array):
-    return (array-np.mean(array))/np.std(array)
+    if array.shape[0]==1: # If the array contains only one sample the standard deviation is 0 and the function returns Nan! 
+        return array
+    else:
+        return (array-np.mean(array, axis=0))/np.std(array, axis=0)
 
 def standardize_sample(array, mean, std):
     return (array-mean)/std
