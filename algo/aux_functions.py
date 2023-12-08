@@ -65,7 +65,7 @@ def load_data(data_path):
     weather_data_array = np.vstack([agent.initial_weather_data for agent in old_agents]) # This array contains all seen weather samples as rows. It's the input of the regression. 
     power_mean_array = np.vstack([np.mean([power_value for _, power_value in agent.power_list]) for agent in old_agents])# This array contains the power of all the agents. It's the target of the regression
     std_weather_data_array = batch_standardize(weather_data_array)
-    std_power_mean_array = batch_standardize(power_mean_array)
+    std_power_mean_array = batch_standardize(power_mean_array.reshape((-1,)))
     return std_weather_data_array, std_power_mean_array, (np.mean(weather_data_array, axis=0), np.std(weather_data_array, axis=0)), (np.mean(power_mean_array, axis=0), np.std(power_mean_array, axis=0))
 
 def fit_model(model, std_weather_data_array, std_power_mean_array):
