@@ -61,7 +61,9 @@ def load_data(data_path):
     old_agents = []
     for filename in agent_files:
         with open(f'{data_path}/{filename}','rb') as f:
-            old_agents.append(pickle.load(f))
+            agent = pickle.load(f)
+            if agent.power_list != []:
+                old_agents.append(agent)
     weather_data_array = np.vstack([agent.initial_weather_data for agent in old_agents]) # This array contains all seen weather samples as rows. It's the input of the regression. 
     power_mean_array = np.vstack([np.mean([power_value for _, power_value in agent.power_list]) for agent in old_agents])# This array contains the power of all the agents. It's the target of the regression
     std_weather_data_array = batch_standardize(weather_data_array)
