@@ -79,7 +79,9 @@ class Operator(util.OperatorBase):
         std_new_weather_input = aux_functions.standardize_sample(new_weather_input, self.weather_mean, self.weather_std)
         try:
             model_output = self.model.predict(std_new_weather_input.reshape(1,-1))
-            return aux_functions.re_standardize_sample(model_output, self.power_mean, self.power_std)
+            predicted_solar_power = aux_functions.re_standardize_sample(model_output, self.power_mean, self.power_std)
+            newest_agent.prediction = predicted_solar_power
+            return predicted_solar_power
         except NotFittedError:
             print("Model not fitted yet.")
             return 

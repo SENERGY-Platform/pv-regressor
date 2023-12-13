@@ -3,6 +3,7 @@ class Agent:
         self.initial_weather_data = None
         self.initial_time = None
         self.power_list = []
+        self.prediction = None
         
     def save_weather_data(self,weather_data):
         self.initial_weather_data = weather_data
