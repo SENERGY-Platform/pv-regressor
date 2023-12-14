@@ -75,7 +75,9 @@ class Operator(util.OperatorBase):
         newest_agent = self.agents[-1]
         newest_agent.save_weather_data(new_weather_input)
         newest_agent.initial_time = weather_time
-
+        if new_weather_input[0] == 0: # This happens if all three weather data points lie in the night between sunset and sunrise.
+            predicted_solar_power = 0
+            return predicted_solar_power
         std_new_weather_input = aux_functions.standardize_sample(new_weather_input, self.weather_mean, self.weather_std)
         try:
             model_output = self.model.predict(std_new_weather_input.reshape(1,-1))
