@@ -120,11 +120,11 @@ class Operator(util.OperatorBase):
                     power_forecast.append((new_weather_forecasted_for[i],0))
             else:
                 std_new_weather_input = aux_functions.standardize_sample(new_weather_input, self.weather_mean, self.weather_std)
-            try:
-                model_output = self.model.predict(std_new_weather_input.reshape(1,-1))
-                power_forecast.append((new_weather_forecasted_for[i],aux_functions.re_standardize_sample(model_output, self.power_mean, self.power_std)))
-            except NotFittedError:
-                print("Model not fitted yet.")
+                try:
+                    model_output = self.model.predict(std_new_weather_input.reshape(1,-1))
+                    power_forecast.append((new_weather_forecasted_for[i],aux_functions.re_standardize_sample(model_output, self.power_mean, self.power_std)))
+                except NotFittedError:
+                    print("Model not fitted yet.")
         return power_forecast
         
     def run(self, data, selector):
