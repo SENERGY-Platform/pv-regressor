@@ -33,6 +33,7 @@ def preprocess_weather_data(new_weather_data, weather_time, observer):
                  data_point['instant_cloud_area_fraction']] for data_point in new_weather_data]
 
     weather_array = np.array(aux_list)
+    weather_array = np.nan_to_num(weather_array)
 
     return weather_array
 
