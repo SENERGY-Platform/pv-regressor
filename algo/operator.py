@@ -68,7 +68,7 @@ class Operator(util.OperatorBase):
     def run_new_weather(self, new_weather_data):
         weather_time = pd.to_datetime(new_weather_data[0]['weather_time'])
 
-        new_weather_array = aux_functions.preprocess_weather_data(new_weather_data, weather_time, self.observer)
+        new_weather_array = aux_functions.preprocess_weather_data(new_weather_data, self.observer, case="new_agent")
         new_weather_input = np.mean(new_weather_array, axis=0)
         
         self.agents.append(Agent.Agent())
@@ -110,11 +110,10 @@ class Operator(util.OperatorBase):
             del self.agents[index]
 
     def create_power_forecast(self, new_weather_data):
-        weather_time = pd.to_datetime(new_weather_data[0]['weather_time'])
         power_forecast = []
-        new_weather_array = aux_functions.preprocess_weather_data(new_weather_data, weather_time, self.observer)
+        new_weather_array = aux_functions.preprocess_weather_data(new_weather_data, self.observer, case="create_power_forecast")
         new_weather_forecasted_for = [pd.to_datetime(datapoint['forecasted_for']) for datapoint in new_weather_data]
-        for i in range(0,len(new_weather_array),2):
+        for i in range(0,len(new_weather_array)):
             new_weather_input = np.mean(new_weather_array[i:i+2], axis=0)
             if new_weather_input[0] == 0: # If data time lies between sunrise and sunset there's definitely no solar power.
                     power_forecast.append((new_weather_forecasted_for[i],0))

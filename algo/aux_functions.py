@@ -12,30 +12,51 @@ def preprocess_power_data(new_power_data, timezone):
     return time, power
 
 
-def preprocess_weather_data(new_weather_data, weather_time, observer):
+def preprocess_weather_data(new_weather_data, observer, case):
+    if case == "new_agent":
+        weather_time = pd.to_datetime(new_weather_data[0]['weather_time'])
+        today_sunrise = pd.to_datetime(sun.sunrise(observer, date=weather_time))
+        today_sunset = pd.to_datetime(sun.sunset(observer, date=weather_time))
 
-    today_sunrise = pd.to_datetime(sun.sunrise(observer, date=weather_time))
-    today_sunset = pd.to_datetime(sun.sunset(observer, date=weather_time))
+        dist_today_sunrise = np.abs((weather_time-today_sunrise).total_seconds())
+        dist_today_sunset = np.abs((weather_time-today_sunset).total_seconds())
 
-    dist_today_sunrise = np.abs((weather_time-today_sunrise).total_seconds())
-    dist_today_sunset = np.abs((weather_time-today_sunset).total_seconds())
+        if (weather_time <= today_sunrise) or (today_sunset <= weather_time):
+            min_seconds_to_sunrise_or_sunset = 0
+        else:
+            min_seconds_to_sunrise_or_sunset = min(dist_today_sunrise, dist_today_sunset)
 
-    if (weather_time <= today_sunrise) or (today_sunset <= weather_time):
-        min_seconds_to_sunrise_or_sunset = 0
-    else:
-        min_seconds_to_sunrise_or_sunset = min(dist_today_sunrise, dist_today_sunset)
+        aux_list = [[min_seconds_to_sunrise_or_sunset, data_point['instant_air_temperature'], data_point['instant_relative_humidity'],
+                     data_point['instant_ultraviolet_index_clear_sky'], data_point['1_hours_precipitation_amount'],
+                     data_point['instant_cloud_area_fraction']] for data_point in new_weather_data]
 
-    # Normalization of relative humidity (min=0, max=100), uv-index (min=0, max~10), cloud area fraction
-    # (min=0, max=100) is easy. For temperature we choose min=-10, max=30 and for precipitation amount: min=0, max=10.
+        weather_array = np.array(aux_list)
+        weather_array = np.nan_to_num(weather_array)
+    
+    elif case == "create_power_forecast":
+        aux_list = []
+        for data_point in new_weather_data:
+            forecasted_for = pd.to_datetime(data_point["forecasted_for"])
+            forecasted_for_sunrise = pd.to_datetime(sun.sunrise(observer, date=forecasted_for))
+            forecasted_for_sunset = pd.to_datetime(sun.sunset(observer, date=forecasted_for))
 
-    aux_list = [[min_seconds_to_sunrise_or_sunset, data_point['instant_air_temperature'], data_point['instant_relative_humidity'],
-                 data_point['instant_ultraviolet_index_clear_sky'], data_point['1_hours_precipitation_amount'],
-                 data_point['instant_cloud_area_fraction']] for data_point in new_weather_data]
+            dist_forecasted_for_sunrise = np.abs((forecasted_for-forecasted_for_sunrise).total_seconds())
+            dist_forecasted_for_sunset = np.abs((forecasted_for-forecasted_for_sunset).total_seconds())
 
-    weather_array = np.array(aux_list)
-    weather_array = np.nan_to_num(weather_array)
+            if (forecasted_for <= forecasted_for_sunrise) or (forecasted_for_sunset <= forecasted_for):
+                min_seconds_to_sunrise_or_sunset = 0
+            else:
+                min_seconds_to_sunrise_or_sunset = min(dist_forecasted_for_sunrise, dist_forecasted_for_sunset)
+
+            aux_list.append([min_seconds_to_sunrise_or_sunset, data_point['instant_air_temperature'], data_point['instant_relative_humidity'],
+                     data_point['instant_ultraviolet_index_clear_sky'], data_point['1_hours_precipitation_amount'],
+                     data_point['instant_cloud_area_fraction']])
+            
+            weather_array = np.array(aux_list)
+            weather_array = np.nan_to_num(weather_array)
 
     return weather_array
+
 
 def batch_standardize(array):
     if np.std(array, axis=0).all()==False: # If the array consisting of the respective std dev contains zeros the function returns Nan! 
