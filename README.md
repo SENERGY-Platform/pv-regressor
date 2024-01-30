@@ -1,4 +1,4 @@
-# pv-usecase
+# pv-regressor
 
 ## Config options
 
