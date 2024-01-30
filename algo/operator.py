@@ -65,7 +65,7 @@ class Operator(util.OperatorBase):
 
         self.model_file = f'{data_path}/model.pickle'
 
-        self.add_microsec = -1
+        self.add_microsec = 0
 
     def run_new_weather(self, new_weather_data):
         weather_time = pd.to_datetime(new_weather_data[0]['weather_time'])
