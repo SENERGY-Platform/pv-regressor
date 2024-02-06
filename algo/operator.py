@@ -140,7 +140,7 @@ class Operator(util.OperatorBase):
                 _ = self.run_new_weather(new_weather_data[0:2])
                 power_forecast = self.create_power_forecast(new_weather_data)
                 self.weather_same_timestamp = []
-                if True:  #TODO: Implement on conditions that ensures relatively good output. (How much data does one need for good training?)
+                if len(power_forecast)==48:  #TODO: Implement on conditions that ensures relatively good output. (How much data does one need for good training?)
                     print("PV-Operator-Output:", [{'timestamp':timestamp.strftime('%Y-%m-%dT%H:%M:%S.%fZ'), 'value': float(forecast)} for timestamp, forecast in power_forecast])
                     return [{'timestamp':timestamp.strftime('%Y-%m-%dT%H:%M:%S.%fZ'), 'output': float(forecast)} for timestamp, forecast in power_forecast]
         elif selector == 'power_func':
