@@ -65,7 +65,7 @@ class Operator(util.OperatorBase):
 
         self.model_file = f'{data_path}/model.pickle'
 
-        self.add_millisec = 0
+        self.add_microsec = 0
 
     def run_new_weather(self, new_weather_data):
         weather_time = pd.to_datetime(new_weather_data[0]['weather_time'])
@@ -131,7 +131,7 @@ class Operator(util.OperatorBase):
     def run(self, data, selector):
         print(selector + ": " + str(data))
         if selector == 'weather_func':
-            self.add_millisec += 1
+            self.add_microsec += 1
             if len(self.weather_same_timestamp)<47:
                 self.weather_same_timestamp.append(data)
             elif len(self.weather_same_timestamp)==47:
@@ -142,6 +142,6 @@ class Operator(util.OperatorBase):
                 self.weather_same_timestamp = []
                 if len(power_forecast)==48:  #TODO: Implement on conditions that ensures relatively good output. (How much data does one need for good training?)
                     print("PV-Operator-Output:", [{'timestamp':timestamp.strftime('%Y-%m-%dT%H:%M:%S.%fZ'), 'value': float(forecast)} for timestamp, forecast in power_forecast])
-                    return [{'timestamp':(timestamp + pd.Timedelta(self.add_millisec, "millisecond")).strftime('%Y-%m-%dT%H:%M:%S.%fZ'), 'output': float(forecast)} for timestamp, forecast in power_forecast]
+                    return [{'timestamp':(timestamp + pd.Timedelta(self.add_microsec, "microsecond")).strftime('%Y-%m-%dT%H:%M:%S.%fZ'), 'output': float(forecast)} for timestamp, forecast in power_forecast]
         elif selector == 'power_func':
             self.run_new_power(data)
