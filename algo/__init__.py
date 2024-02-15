@@ -14,4 +14,5 @@
    limitations under the License.
 """
 
-from .operator import *
+from .Agent import *
+from .aux_functions import *
