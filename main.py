@@ -40,8 +40,8 @@ class Operator(OperatorBase):
 
     selectors = [
         Selector({"name": "weather_func", "args": ["instant_air_temperature", "instant_relative_humidity", "instant_ultraviolet_index_clear_sky",
-                                                   "1_hours_precipitation_amount", "instant_cloud_area_fraction", "weather_time", "forecasted_for"]},
-                 {"name": "power_func", "args": ["energy_time", "energy"]})
+                                                   "1_hours_precipitation_amount", "instant_cloud_area_fraction", "weather_time", "forecasted_for"]}),
+        Selector({"name": "power_func", "args": ["energy_time", "energy"]})
     ]
 
     def init(self, *args, **kwargs):
