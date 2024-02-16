@@ -162,3 +162,7 @@ class Operator(OperatorBase):
                     return [{'timestamp':(timestamp + pd.Timedelta(self.add_microsec, "microsecond")).strftime('%Y-%m-%dT%H:%M:%S.%fZ'), 'output': float(forecast)} for timestamp, forecast in power_forecast]
         elif selector == 'power_func':
             self.run_new_power(data)
+
+from operator_lib.operator_lib import OperatorLib
+if __name__ == "__main__":
+    OperatorLib(Operator(), name="pv-regressor-detection-operator", git_info_file='git_commit')
