@@ -90,7 +90,7 @@ class Operator(OperatorBase):
         new_weather_array = aux_functions.preprocess_weather_data(new_weather_data, self.observer, case="new_agent")
         new_weather_input = np.mean(new_weather_array, axis=0)
         
-        self.agents.append(Agent.Agent())
+        self.agents.append(Agent())
         newest_agent = self.agents[-1]
         newest_agent.save_weather_data(new_weather_input)
         newest_agent.initial_time = weather_time
