@@ -84,6 +84,8 @@ class Operator(OperatorBase):
 
         self.add_microsec = 0
 
+        self.operator_start = pd.Timestamp.now(tz=self.timezone)
+
     def run_new_weather(self, new_weather_data):
         weather_time = pd.to_datetime(new_weather_data[0]['weather_time'])
 
@@ -159,7 +161,18 @@ class Operator(OperatorBase):
                 self.weather_same_timestamp = []
                 if len(power_forecast)==48:  #TODO: Implement on conditions that ensures relatively good output. (How much data does one need for good training?)
                     print("PV-Operator-Output:", [{'timestamp':timestamp.strftime('%Y-%m-%dT%H:%M:%S.%fZ'), 'value': float(forecast)} for timestamp, forecast in power_forecast])
-                    return [{'timestamp':(timestamp + pd.Timedelta(self.add_microsec, "microsecond")).strftime('%Y-%m-%dT%H:%M:%S.%fZ'), 'output': float(forecast)} for timestamp, forecast in power_forecast]
+                    if pd.to_datetime(data['weather_time']) - self.operator_start < pd.Timedelta(7, 'd'):
+                        print("Still in initial phase!")
+                        td_until_start = pd.Timedelta(7,'d') - (pd.to_datetime(data['weather_time']) - self.operator_start)
+                        hours_until_start = int(td_until_start.total_seconds()/(60*60))
+                        return [{"timestamp":(timestamp + pd.Timedelta(self.add_microsec, "microsecond")).strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
+                                 "output": float(forecast),
+                                 "initial_phase": f"Die Anwendung befindet sich noch für ca. {hours_until_start} Stunden in der Initialisierungsphase"}
+                                for timestamp, forecast in power_forecast]
+                    else:
+                        return [{"timestamp":(timestamp + pd.Timedelta(self.add_microsec, "microsecond")).strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
+                                 "output": float(forecast),
+                                 "initial_phase": ""} for timestamp, forecast in power_forecast]
         elif selector == 'power_func':
             self.run_new_power(data)
 
