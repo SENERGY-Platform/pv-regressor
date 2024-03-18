@@ -148,7 +148,7 @@ class Operator(OperatorBase):
                     logger.info("Model not fitted yet.")
         return power_forecast
         
-    def run(self, data, selector):
+    def run(self, data, selector, topic=''):
         logger.debug(selector + ": " + str(data))
         if selector == 'weather_func':
             self.add_microsec += 1
