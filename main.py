@@ -22,7 +22,6 @@ import pickle
 import pandas as pd
 import numpy as np
 import os
-import logging
 import astral
 from timezonefinder import TimezoneFinder
 #from xgboost.sklearn import XGBRegressor
@@ -87,8 +86,6 @@ class Operator(OperatorBase):
         self.add_microsec = 0
 
         self.operator_start = pd.Timestamp.now(tz=self.timezone)
-
-        logger.setLevel(logging.DEBUG)
 
     def run_new_weather(self, new_weather_data):
         weather_time = pd.to_datetime(new_weather_data[0]['weather_time'])
