@@ -4,7 +4,7 @@
 ## Input
 | key                                       | type                                                 | description                                                                                                |
 |-------------------------------------------|------------------------------------------------------|------------------------------------------------------------------------------------------------------------|
-| `1_hours_precipitation_amount`            | float                                                | Avg. amount of forecasted precipitation for hour specified by `forecasted_for`; in mm bzw. l/m^2           |
+| `1_hours_precipitation_amount`            | float                                                | Avg. amount of forecasted precipitation for hour specified by `forecasted_for`; in mm bzw. l/m²           |
 | `instant_cloud_area_fraction`             | float                                                | Avg. percentage of forcasted cloud coverage for hour specified by `forecasted_for`; abs. nr. bw. 0 and 100 |
 | `instant_air_temperature`                 | float                                                | Avg. forecasted temperature for hour specified by `forecasted_for`; in °C                                  |
 | `instant_relative_humidity`               | float                                                | Avg. relative humidity for hour specified by `forecasted_for`; abs. nr. bw. 0 and 100                      |
