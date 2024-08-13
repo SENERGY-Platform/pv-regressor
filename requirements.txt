@@ -1,6 +1,5 @@
 git+https://github.com/SENERGY-Platform/analytics-operator-lib-python@v1.1.29
 
-confluent_kafka<2
 pandas<2
 kazoo<3
 astral
