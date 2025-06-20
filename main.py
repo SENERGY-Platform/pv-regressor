@@ -152,7 +152,7 @@ class Operator(OperatorBase):
         logger.debug(selector + ": " + str(data))
         if selector == 'weather_func':
             self.add_microsec += 1
-            if len(self.weather_same_timestamp)<47:
+            if len(self.weather_same_timestamp)<47: # Number of weather forecast messages is 48.
                 self.weather_same_timestamp.append(data)
             elif len(self.weather_same_timestamp)==47:
                 self.weather_same_timestamp.append(data)
