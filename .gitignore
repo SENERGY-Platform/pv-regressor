@@ -3,3 +3,4 @@ tests/resources/opr_config.json
 data
 __pycache__
 .env
+.idea
