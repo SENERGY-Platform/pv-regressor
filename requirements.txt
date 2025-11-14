@@ -1,12 +1,16 @@
 git+https://github.com/SENERGY-Platform/analytics-operator-lib-python@v1.1.32
 
 pandas<2
+numpy==1.26.4
 kazoo<3
+scikit-learn == 1.3.0
+statsmodels==0.13.5
+lightgbm==3.3.5
+darts == 0.24.0
+python-dotenv==1.0.0
 astral
 datetime
 pytz
 matplotlib
 tzdata
 timezonefinder
-sklearn
-numpy==1.26.4
