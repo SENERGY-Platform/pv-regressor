@@ -1,4 +1,4 @@
-git+https://github.com/SENERGY-Platform/analytics-operator-lib-python@v1.1.32
+git+https://github.com/SENERGY-Platform/analytics-operator-lib-python@v1.2.1
 
 pandas<2
 numpy==1.26.4

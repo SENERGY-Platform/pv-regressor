@@ -4,8 +4,8 @@ from astral import sun
 import os
 import pickle
 
-def preprocess_power_data(new_power_data, timezone):
-    time=pd.to_datetime(new_power_data['energy_time'])
+def preprocess_power_data(new_power_data, current_timestamp, timezone):
+    time=current_timestamp
     if time.tzinfo == None:
         time = time.tz_localize(timezone)
     power = new_power_data['energy']

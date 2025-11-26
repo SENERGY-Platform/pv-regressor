@@ -28,6 +28,9 @@ from timezonefinder import TimezoneFinder
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.exceptions import NotFittedError
 
+import typing
+import datetime
+
 from operator_lib.util import Config
 class CustomConfig(Config):
     data_path = "/opt/data"
@@ -110,8 +113,8 @@ class Operator(OperatorBase):
             logger.info("Model not fitted yet.")
             return 
 
-    def run_new_power(self, new_power_data):
-        time, new_power_value = aux_functions.preprocess_power_data(new_power_data, self.timezone)
+    def run_new_power(self, new_power_data, current_timestamp):
+        time, new_power_value = aux_functions.preprocess_power_data(new_power_data, current_timestamp, self.timezone)
 
         old_indices = []
         
@@ -148,7 +151,9 @@ class Operator(OperatorBase):
                     logger.info("Model not fitted yet.")
         return power_forecast
         
-    def run(self, data, selector, device_id=None):
+    def run(self, data: typing.Dict[str, typing.Any], selector: str, device_id, timestamp: datetime.datetime):
+         # Convert to german time and then forget the timezone.
+        current_timestamp = pd.Timestamp(timestamp).tz_localize("Zulu").tz_convert("Europe/Berlin").tz_localize(None)
         logger.debug(selector + ": " + str(data))
         if selector == 'weather_func':
             self.add_microsec += 1
@@ -175,7 +180,7 @@ class Operator(OperatorBase):
                                  "output": float(forecast),
                                  "initial_phase": ""} for timestamp, forecast in power_forecast]
         elif selector == 'power_func':
-            self.run_new_power(data)
+            self.run_new_power(data, current_timestamp)
 
 from operator_lib.operator_lib import OperatorLib
 if __name__ == "__main__":
