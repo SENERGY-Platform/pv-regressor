@@ -1,17 +1,39 @@
 name: 'PROD build'
 
+# master builds :prod as before plus :vX.Y.Z; a release/vN branch keeps an older major
+# alive and builds only its :vN.x.y. The git tag is pushed after the image, so a failed
+# build never consumes a version.
 on:
   push:
     branches:
       - master
+      - 'release/v*'
   workflow_dispatch:
 
 jobs:
   multi:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - name: Version
+        id: version
+        run: echo "tag=$(.github/scripts/next-version.sh "$GITHUB_REF_NAME")" >> "$GITHUB_OUTPUT"
+      - name: Image tags
+        id: tags
+        run: |
+          {
+            echo 'list<<EOF'
+            echo "ghcr.io/senergy-platform/pv-regressor-operator:${{ steps.version.outputs.tag }}"
+            if [ "$GITHUB_REF_NAME" = 'master' ]; then
+              echo 'ghcr.io/senergy-platform/pv-regressor-operator:prod'
+            fi
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
       - name: Login to DockerHub
         uses: docker/login-action@v1
         with:
@@ -34,5 +56,11 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64
           push: true
-          tags: |
-            ghcr.io/senergy-platform/pv-regressor-operator:prod
+          tags: ${{ steps.tags.outputs.list }}
+      - name: Push version tag
+        run: |
+          tag='${{ steps.version.outputs.tag }}'
+          if [ -z "$(git tag --points-at HEAD --list "$tag")" ]; then
+            git tag "$tag"
+            git push origin "$tag"
+          fi
