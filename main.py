@@ -14,175 +14,208 @@
    limitations under the License.
 """
 
-__all__ = ("Operator", )
+"""PV power forecasting operator using operator-lib's external ML lifecycle."""
 
-from operator_lib.util import OperatorBase, Selector, logger
-from algo import aux_functions, Agent
-import pickle
-import pandas as pd
-import numpy as np
-import os
-import astral
-from timezonefinder import TimezoneFinder
-#from xgboost.sklearn import XGBRegressor
-from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.exceptions import NotFittedError
-
-import typing
 import datetime
+import math
 
-from operator_lib.util import Config
+import mlflow
+import pandas as pd
+from mlflow import MlflowClient
+from operator_lib.operator_lib import OperatorLib
+from operator_lib.util import Config, MLOperator, Selector, logger
+from operator_lib.util.helpers import provide_historic_data
+
+from algo.training import train_on_ray
+
+
+WEATHER_FIELDS = [
+    "instant_air_temperature",
+    "instant_relative_humidity",
+    "instant_ultraviolet_index_clear_sky",
+    "1_hours_precipitation_amount",
+    "instant_cloud_area_fraction",
+    "weather_time",
+    "forecasted_for",
+]
+
+
 class CustomConfig(Config):
-    data_path = "/opt/data"
     lat = 51.34
     long = 12.36
     logger_level = "info"
-    
+    training_duration_days = 90
+    retraining_interval_hours = 24
+    failed_training_retry_hours = 6
+    min_training_hours = 168
+    forecast_batch_size = 48
 
-class Operator(OperatorBase):
+    # Training sees one row per forecast vintage (up to 48 per hour), so the
+    # previous 5000 trees would take hours per fit.
+    model_n_estimators = 500
+    model_max_depth = 64
+    model_min_samples_split = 5
+    model_learning_rate = 0.01
+
+
+class Operator(MLOperator):
     configType = CustomConfig
 
     selectors = [
-        Selector({"name": "weather_func", "args": ["instant_air_temperature", "instant_relative_humidity", "instant_ultraviolet_index_clear_sky",
-                                                   "1_hours_precipitation_amount", "instant_cloud_area_fraction", "weather_time", "forecasted_for"]}),
-        Selector({"name": "power_func", "args": ["energy_time", "energy"]})
+        Selector({"name": "weather_func", "args": WEATHER_FIELDS}),
+        Selector({"name": "power_func", "args": ["energy_time", "energy"]}),
     ]
 
     def init(self, *args, **kwargs):
+        # MLOperator.init may immediately call train(), so state used by train must
+        # exist before calling it.
+        self.weather_batches = {}
+        self.next_retraining_at = None
+        self.initial_phase_until = None
+        self.output_sequence = 0
         super().init(*args, **kwargs)
-        data_path = self.config.data_path
-        
-        if not os.path.exists(data_path):
-            os.mkdir(data_path)
 
-        self.data_path = data_path
-        
-        self.lat = float(self.config.lat)
-        self.long = float(self.config.long)
-        self.observer = astral.Observer(latitude=self.lat, longitude=self.long)
+        if self.next_retraining_at is None:
+            self.schedule_from_production_model()
 
-        tf = TimezoneFinder()
-        self.timezone=tf.certain_timezone_at(lng=self.long, lat=self.lat)
+    def schedule_retraining(self, hours):
+        self.next_retraining_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=hours)
 
-        self.weather_same_timestamp = []
-
-        self.agents = []
-        
-
-        self.weather_mean = 0
-        self.weather_std = 1
-        self.power_mean = 0
-        self.power_std = 1
-
-        params = {
-                 "n_estimators": 5000,
-                 "max_depth": 64,
-                 "min_samples_split": 5,
-                 "learning_rate": 0.01,
-                 "loss": "squared_error",
-                }
-        
-        self.model = GradientBoostingRegressor(**params)
-
-        self.model_file = f'{data_path}/model.pickle'
-
-        self.add_microsec = 0
-
-        self.operator_start = pd.Timestamp.now(tz=self.timezone)
-
-    def run_new_weather(self, new_weather_data):
-        weather_time = pd.to_datetime(new_weather_data[0]['weather_time'])
-
-        new_weather_array = aux_functions.preprocess_weather_data(new_weather_data, self.observer, case="new_agent")
-        new_weather_input = np.mean(new_weather_array, axis=0)
-        
-        self.agents.append(Agent()) # Every time new weather forecasts are coming in, a new agent starts tracking PV power data for 1 hour.
-        newest_agent = self.agents[-1]
-        newest_agent.save_weather_data(new_weather_input)
-        newest_agent.initial_time = weather_time
-        if new_weather_input[0] == 0: # This happens if all three weather data points lie in the night between sunset and sunrise.
-            predicted_solar_power = 0
-            return predicted_solar_power
-        std_new_weather_input = aux_functions.standardize_sample(new_weather_input, self.weather_mean, self.weather_std)
+    def schedule_from_production_model(self):
+        """Preserve the training cadence across operator restarts."""
         try:
-            model_output = self.model.predict(std_new_weather_input.reshape(1,-1))
-            predicted_solar_power = aux_functions.re_standardize_sample(model_output, self.power_mean, self.power_std)
-            newest_agent.prediction = predicted_solar_power
-            return predicted_solar_power
-        except NotFittedError:
-            logger.info("Model not fitted yet.")
-            return 
+            version = MlflowClient().get_model_version_by_alias(self.model_id, "production")
+            created_at = datetime.datetime.fromtimestamp(
+                version.creation_timestamp / 1000.0,
+                tz=datetime.timezone.utc,
+            )
+            self.next_retraining_at = created_at + datetime.timedelta(
+                hours=float(self.config.retraining_interval_hours)
+            )
+        except Exception:
+            self.schedule_retraining(float(self.config.retraining_interval_hours))
 
-    def run_new_power(self, new_power_data, current_timestamp):
-        time, new_power_value = aux_functions.preprocess_power_data(new_power_data, current_timestamp, self.timezone)
+    def train(self, model, mlflow_logger):
+        """Fetch both historic input streams and train on a Ray worker."""
+        try:
+            duration = datetime.timedelta(days=float(self.config.training_duration_days))
+            dataset_refs = provide_historic_data(duration, require_full_duration=False)
+            params = {
+                "n_estimators": int(self.config.model_n_estimators),
+                "max_depth": int(self.config.model_max_depth),
+                "min_samples_split": int(self.config.model_min_samples_split),
+                "learning_rate": float(self.config.model_learning_rate),
+                "loss": "squared_error",
+                "random_state": 42,
+            }
 
-        old_indices = []
-        
-        for i, agent in enumerate(self.agents):
-            if agent.initial_time + pd.Timedelta(1,'hours') >= time:
-                if new_power_value != None:
-                    agent.update_power_list(time, new_power_value)
-            elif agent.initial_time + pd.Timedelta(1,'hours') < time:
-                agents_initial_time_string = agent.initial_time.strftime('%Y-%m-%d %X')
-                with open(f'{self.data_path}/agent_{agents_initial_time_string}.pickle', 'wb') as f:
-                    pickle.dump(agent, f)
-                std_weather_data_array, std_power_mean_array, (self.weather_mean, self.weather_std), (self.power_mean, self.power_std) = aux_functions.load_data(self.data_path)
-                self.model = aux_functions.fit_model(self.model, std_weather_data_array, std_power_mean_array)
-                old_indices.append(i)
+            mlflow_logger.log_params({
+                "training_duration_days": float(self.config.training_duration_days),
+                "min_training_hours": int(self.config.min_training_hours),
+                "latitude": float(self.config.lat),
+                "longitude": float(self.config.long),
+                **{f"model_{key}": value for key, value in params.items()},
+            })
 
-        old_indices = sorted(old_indices, reverse=True)
-        for index in old_indices:
-            del self.agents[index]
+            trained_model, report = train_on_ray(
+                dataset_refs=dataset_refs,
+                latitude=float(self.config.lat),
+                longitude=float(self.config.long),
+                min_training_hours=int(self.config.min_training_hours),
+                estimator_params=params,
+            )
+            mlflow_logger.log_dict(report, "training/report.json")
+            numeric_metrics = {
+                key: value for key, value in report.items()
+                if isinstance(value, (int, float)) and not isinstance(value, bool)
+            }
+            mlflow_logger.log_metrics(numeric_metrics)
+        except Exception:
+            # Raising would stop the operator (or abort init). Keep the current
+            # model and retry later instead.
+            retry_hours = float(self.config.failed_training_retry_hours)
+            logger.exception("Training failed, retrying in %s hours", retry_hours)
+            self.schedule_retraining(retry_hours)
+            return None
 
-    def create_power_forecast(self, new_weather_data):
-        power_forecast = []
-        new_weather_array = aux_functions.preprocess_weather_data(new_weather_data, self.observer, case="create_power_forecast")
-        new_weather_forecasted_for = [pd.to_datetime(datapoint['forecasted_for']) for datapoint in new_weather_data]
-        for i in range(0,len(new_weather_array)):
-            new_weather_input = np.mean(new_weather_array[i:i+2], axis=0)
-            if new_weather_input[0] == 0: # If data time lies between sunrise and sunset there's definitely no solar power.
-                    power_forecast.append((new_weather_forecasted_for[i],0))
-            else:
-                std_new_weather_input = aux_functions.standardize_sample(new_weather_input, self.weather_mean, self.weather_std)
-                try:
-                    model_output = self.model.predict(std_new_weather_input.reshape(1,-1))
-                    re_standardized_prediction = aux_functions.re_standardize_sample(model_output, self.power_mean, self.power_std)
-                    power_forecast.append((new_weather_forecasted_for[i],max(0, re_standardized_prediction)))
-                except NotFittedError:
-                    logger.info("Model not fitted yet.")
-        return power_forecast
-        
-    def run(self, data: typing.Dict[str, typing.Any], selector: str, device_id, timestamp: datetime.datetime):
-         # Convert to german time and then forget the timezone.
-        current_timestamp = pd.Timestamp(timestamp).tz_convert("Europe/Berlin").tz_localize(None)
-        logger.debug(selector + ": " + str(data))
-        if selector == 'weather_func':
-            self.add_microsec += 1
-            if len(self.weather_same_timestamp)<47: # Number of weather forecast messages is 48.
-                self.weather_same_timestamp.append(data)
-            elif len(self.weather_same_timestamp)==47:
-                self.weather_same_timestamp.append(data)
-                new_weather_data = self.weather_same_timestamp
-                _ = self.run_new_weather(new_weather_data[0:2])
-                power_forecast = self.create_power_forecast(new_weather_data)
-                self.weather_same_timestamp = []
-                if len(power_forecast)==48:  #TODO: Implement on conditions that ensures relatively good output. (How much data does one need for good training?)
-                    logger.info("PV-Operator-Output:", [{'timestamp':timestamp.strftime('%Y-%m-%dT%H:%M:%S.%fZ'), 'value': float(forecast)} for timestamp, forecast in power_forecast])
-                    if pd.to_datetime(data['weather_time']) - self.operator_start < pd.Timedelta(7, 'd'):
-                        logger.debug("Still in initial phase!")
-                        td_until_start = pd.Timedelta(7,'d') - (pd.to_datetime(data['weather_time']) - self.operator_start)
-                        hours_until_start = int(td_until_start.total_seconds()/(60*60))
-                        return [{"timestamp":(timestamp + pd.Timedelta(self.add_microsec, "microsecond")).strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
-                                 "output": float(forecast),
-                                 "initial_phase": f"Die Anwendung befindet sich noch für ca. {hours_until_start} Stunden in der Initialisierungsphase"}
-                                for timestamp, forecast in power_forecast]
-                    else:
-                        return [{"timestamp":(timestamp + pd.Timedelta(self.add_microsec, "microsecond")).strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
-                                 "output": float(forecast),
-                                 "initial_phase": ""} for timestamp, forecast in power_forecast]
-        elif selector == 'power_func':
-            self.run_new_power(data, current_timestamp)
+        if trained_model is None:
+            logger.info("Not enough matched PV/weather history for training: %s", report)
+            # Matched history grows by about one hour per hour of incoming data.
+            missing_hours = max(0, int(self.config.min_training_hours) - report["matched_hours"])
+            self.initial_phase_until = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=missing_hours)
+            self.schedule_retraining(float(self.config.failed_training_retry_hours))
+            return None
 
-from operator_lib.operator_lib import OperatorLib
+        self.schedule_retraining(float(self.config.retraining_interval_hours))
+        return trained_model
+
+    def need_retraining(self, model):
+        if self.next_retraining_at is None:
+            return False
+        due = datetime.datetime.now(datetime.timezone.utc) >= self.next_retraining_at
+        if due and mlflow.active_run() is not None:
+            # operator-lib leaves a run open when a training attempt returns no
+            # model. Close it immediately before the next attempt starts.
+            mlflow.end_run(status="FINISHED")
+        return due
+
+    def initial_phase_message(self):
+        """Tell consumers that no model exists yet and, if known, for how long."""
+        if self.initial_phase_until is None:
+            return "Die Anwendung befindet sich noch in der Initialisierungsphase"
+        # A model can appear no earlier than the next training attempt.
+        until = self.initial_phase_until
+        if self.next_retraining_at is not None:
+            until = max(until, self.next_retraining_at)
+        remaining = until - datetime.datetime.now(datetime.timezone.utc)
+        hours = max(1, math.ceil(remaining.total_seconds() / 3600))
+        return f"Die Anwendung befindet sich noch für ca. {hours} Stunden in der Initialisierungsphase"
+
+    def infer(self, model, data, selector, device_id, timestamp):
+        if selector == "power_func":
+            # PV values are read from the historic platform source by train().
+            return None, None, None
+        if selector != "weather_func":
+            return None, None, None
+
+        weather_time = pd.to_datetime(data["weather_time"], utc=True, errors="coerce")
+        if pd.isna(weather_time):
+            logger.warning("Ignoring weather value with invalid weather_time")
+            return None, None, None
+
+        batch_key = weather_time.isoformat()
+        batch = self.weather_batches.setdefault(batch_key, [])
+        batch.append(dict(data))
+        expected_size = int(self.config.forecast_batch_size)
+        if len(batch) < expected_size:
+            return None, None, None
+
+        # Remove before prediction so a malformed batch cannot remain stuck.
+        forecast_rows = self.weather_batches.pop(batch_key)[:expected_size]
+        if model is None:
+            # Without a model there is no value, but consumers still learn why.
+            logger.info("No production model available yet")
+            predictions = [None] * len(forecast_rows)
+            initial_phase = self.initial_phase_message()
+        else:
+            frame = pd.DataFrame(forecast_rows)
+            predictions = [float(max(0.0, value)) for value in model.predict(frame)]
+            initial_phase = ""
+
+        self.output_sequence += 1
+        result = []
+        for row, prediction in zip(forecast_rows, predictions):
+            target = pd.to_datetime(row["forecasted_for"], utc=True)
+            output_time = target + pd.Timedelta(self.output_sequence, unit="us")
+            result.append({
+                "timestamp": output_time.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+                "output": prediction,
+                "initial_phase": initial_phase,
+            })
+        # operator-lib gives all results of a run one timestamp. None leaves the
+        # Kafka timestamp to the producer; the forecast time is in the payload.
+        return None, result, None
+
+
 if __name__ == "__main__":
-    OperatorLib(Operator(), name="pv-regressor-operator", git_info_file='git_commit')
+    OperatorLib(Operator(), name="pv-regressor-operator", git_info_file="git_commit")

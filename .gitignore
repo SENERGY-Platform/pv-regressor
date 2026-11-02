@@ -4,3 +4,6 @@ data
 __pycache__
 .env
 .idea
+.venv
+mlflow.db
+mlruns

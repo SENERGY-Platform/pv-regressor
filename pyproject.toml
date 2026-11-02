@@ -1,0 +1,16 @@
+[project]
+name = "pv-regressor"
+version = "0.1.0"
+requires-python = ">=3.10,<3.11"
+dependencies = [
+  "astral>=3,<4",
+  "mlflow==3.8.1",
+  "numpy==1.26.4",
+  "operator-lib @ git+https://github.com/SENERGY-Platform/analytics-operator-lib-python.git@v1.13.0",
+  "pandas<2",
+  "ray[client,data]==2.55.0",
+  "scikit-learn==1.3.0",
+]
+
+[tool.uv]
+package = false

@@ -1,0 +1,15 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug PV Regressor",
+            "type": "debugpy",
+            "request": "launch",
+            "python": "${workspaceFolder}/.vscode/run-uv-python.cmd",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "envFile": "${workspaceFolder}/.env"
+        }
+    ]
+}
