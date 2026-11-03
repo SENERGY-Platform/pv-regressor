@@ -29,11 +29,6 @@
 | `lat`              | float                                                | latitude of PV-system                                     | yes      |
 | `long`             | float                                                | longitude of PV-system                                    | yes      |
 | `logger_level`     | string                                               | `info`, `warning` (default), `error`, `critical`, `debug` | no       |
-| `training_duration_days` | number | Historic time range requested for training (default: 90 days) | no |
-| `retraining_interval_hours` | number | Time between successful training runs (default: 24 hours) | no |
-| `failed_training_retry_hours` | number | Retry interval when a training attempt fails or too little matched data exists (default: 6 hours) | no |
-| `min_training_hours` | integer | Required distinct PV target hours (default: 168) | no |
-| `forecast_batch_size` | integer | Number of weather rows belonging to one forecast; must equal `max_forecasts` of the weather import (default: 48) | no |
 
 ## Training and persistence
 
@@ -49,18 +44,32 @@ MLflow. The `production` model alias is used for inference. Consequently,
 operator-local files are neither the source of training data nor the model
 registry, and restarts do not discard the trained model.
 
-Until the first model is trained, which requires `min_training_hours` hours
-of matched weather and PV data, every forecast batch is answered with `output`
-set to `null` and `initial_phase` stating the approximate remaining time.
+The training parameters are fixed in `main.py` and are not part of the config:
+90 days of history, a new training every 24 hours, a retry after 6 hours when a
+training fails or finds too little data, and at least 168 hours of matched
+weather and PV data.
+
+Until the first model is trained, every forecast batch is answered with
+`output` set to `null` and `initial_phase` stating the approximate remaining
+time.
 
 ## Weather input
 
 The weather input is provided by
 [import-yr-forecast](https://github.com/SENERGY-Platform/import-yr-forecast).
-Its `max_forecasts` config must equal `forecast_batch_size` (48); with the
-import's default of 1, no forecast batch is ever complete. `weather_time` is
-mapped from the import message time, which is the same for all rows of one MET
-forecast and therefore identifies the batch.
+Its `max_forecasts` config must be 48, the number of rows the operator collects
+per forecast; with the import's default of 1, no forecast batch is ever
+complete. `weather_time` is mapped from the import message time, which is the
+same for all rows of one MET forecast and therefore identifies the batch.
+
+## Manifest
+
+The interface is declared in `main.py` (`PVInputs`, `ForecastOutputs`,
+`CustomConfig`). `uv run python -m operator_lib manifest main.py` writes
+`operator-manifest.json` from it; the CI does so before every release and
+commits it. Once `operators/pv-regressor.json` in `platform-content` names this
+repository as its `source_repository`, the platform reads inputs, outputs and
+config of a version from the manifest at its tag.
 
 ## Development
 

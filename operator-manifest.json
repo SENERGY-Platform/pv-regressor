@@ -1,0 +1,68 @@
+{
+  "inputs": [
+    {
+      "name": "instant_air_temperature",
+      "type": "float"
+    },
+    {
+      "name": "instant_relative_humidity",
+      "type": "float"
+    },
+    {
+      "name": "instant_ultraviolet_index_clear_sky",
+      "type": "int"
+    },
+    {
+      "name": "1_hours_precipitation_amount",
+      "type": "float"
+    },
+    {
+      "name": "instant_cloud_area_fraction",
+      "type": "float"
+    },
+    {
+      "name": "weather_time",
+      "type": "string"
+    },
+    {
+      "name": "forecasted_for",
+      "type": "string"
+    },
+    {
+      "name": "energy_time",
+      "type": "string"
+    },
+    {
+      "name": "energy",
+      "type": "float"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "output",
+      "type": "float"
+    },
+    {
+      "name": "timestamp",
+      "type": "string"
+    },
+    {
+      "name": "initial_phase",
+      "type": "string"
+    }
+  ],
+  "config_values": [
+    {
+      "name": "lat",
+      "type": "float"
+    },
+    {
+      "name": "long",
+      "type": "float"
+    },
+    {
+      "name": "logger_level",
+      "type": "string"
+    }
+  ]
+}

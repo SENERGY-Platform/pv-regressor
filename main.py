@@ -23,7 +23,7 @@ import mlflow
 import pandas as pd
 from mlflow import MlflowClient
 from operator_lib.operator_lib import OperatorLib
-from operator_lib.util import Config, MLOperator, Selector, logger
+from operator_lib.util import Config, Inputs, MLOperator, Outputs, Selector, logger
 from operator_lib.util.helpers import provide_historic_data
 
 from algo.training import train_on_ray
@@ -40,26 +40,60 @@ WEATHER_FIELDS = [
 ]
 
 
-class CustomConfig(Config):
-    lat = 51.34
-    long = 12.36
-    logger_level = "info"
-    training_duration_days = 90
-    retraining_interval_hours = 24
-    failed_training_retry_hours = 6
-    min_training_hours = 168
-    forecast_batch_size = 48
+# Fixed in code rather than config: every config field becomes a value flows
+# can set, and these are not meant to be changed per deployment.
+TRAINING_DURATION_DAYS = 90
+RETRAINING_INTERVAL_HOURS = 24
+FAILED_TRAINING_RETRY_HOURS = 6
+MIN_TRAINING_HOURS = 168
+# Must equal max_forecasts of import-yr-forecast.
+FORECAST_BATCH_SIZE = 48
 
-    # Training sees one row per forecast vintage (up to 48 per hour), so the
-    # previous 5000 trees would take hours per fit.
-    model_n_estimators = 500
-    model_max_depth = 64
-    model_min_samples_split = 5
-    model_learning_rate = 0.01
+# Training sees one row per forecast vintage (up to 48 per hour), so the
+# previous 5000 trees would take hours per fit.
+ESTIMATOR_PARAMS = {
+    "n_estimators": 500,
+    "max_depth": 64,
+    "min_samples_split": 5,
+    "learning_rate": 0.01,
+    "loss": "squared_error",
+    "random_state": 42,
+}
+
+
+class CustomConfig(Config):
+    lat: float = 51.34
+    long: float = 12.36
+    # A field of the library, declared again so that flows can set it.
+    logger_level: str = "info"
+
+
+class PVInputs(Inputs):
+    # 1_hours_precipitation_amount is no identifier, so the fields are given as
+    # the annotations mapping instead of class annotations.
+    __annotations__ = {
+        "instant_air_temperature": float,
+        "instant_relative_humidity": float,
+        "instant_ultraviolet_index_clear_sky": int,
+        "1_hours_precipitation_amount": float,
+        "instant_cloud_area_fraction": float,
+        "weather_time": str,
+        "forecasted_for": str,
+        "energy_time": str,
+        "energy": float,
+    }
+
+
+class ForecastOutputs(Outputs):
+    output: float
+    timestamp: str
+    initial_phase: str
 
 
 class Operator(MLOperator):
     configType = CustomConfig
+    inputs = PVInputs
+    outputs = ForecastOutputs
 
     selectors = [
         Selector({"name": "weather_func", "args": WEATHER_FIELDS}),
@@ -89,40 +123,30 @@ class Operator(MLOperator):
                 version.creation_timestamp / 1000.0,
                 tz=datetime.timezone.utc,
             )
-            self.next_retraining_at = created_at + datetime.timedelta(
-                hours=float(self.config.retraining_interval_hours)
-            )
+            self.next_retraining_at = created_at + datetime.timedelta(hours=RETRAINING_INTERVAL_HOURS)
         except Exception:
-            self.schedule_retraining(float(self.config.retraining_interval_hours))
+            self.schedule_retraining(RETRAINING_INTERVAL_HOURS)
 
     def train(self, model, mlflow_logger):
         """Fetch both historic input streams and train on a Ray worker."""
         try:
-            duration = datetime.timedelta(days=float(self.config.training_duration_days))
+            duration = datetime.timedelta(days=TRAINING_DURATION_DAYS)
             dataset_refs = provide_historic_data(duration, require_full_duration=False)
-            params = {
-                "n_estimators": int(self.config.model_n_estimators),
-                "max_depth": int(self.config.model_max_depth),
-                "min_samples_split": int(self.config.model_min_samples_split),
-                "learning_rate": float(self.config.model_learning_rate),
-                "loss": "squared_error",
-                "random_state": 42,
-            }
 
             mlflow_logger.log_params({
-                "training_duration_days": float(self.config.training_duration_days),
-                "min_training_hours": int(self.config.min_training_hours),
+                "training_duration_days": TRAINING_DURATION_DAYS,
+                "min_training_hours": MIN_TRAINING_HOURS,
                 "latitude": float(self.config.lat),
                 "longitude": float(self.config.long),
-                **{f"model_{key}": value for key, value in params.items()},
+                **{f"model_{key}": value for key, value in ESTIMATOR_PARAMS.items()},
             })
 
             trained_model, report = train_on_ray(
                 dataset_refs=dataset_refs,
                 latitude=float(self.config.lat),
                 longitude=float(self.config.long),
-                min_training_hours=int(self.config.min_training_hours),
-                estimator_params=params,
+                min_training_hours=MIN_TRAINING_HOURS,
+                estimator_params=ESTIMATOR_PARAMS,
             )
             mlflow_logger.log_dict(report, "training/report.json")
             numeric_metrics = {
@@ -133,20 +157,19 @@ class Operator(MLOperator):
         except Exception:
             # Raising would stop the operator (or abort init). Keep the current
             # model and retry later instead.
-            retry_hours = float(self.config.failed_training_retry_hours)
-            logger.exception("Training failed, retrying in %s hours", retry_hours)
-            self.schedule_retraining(retry_hours)
+            logger.exception("Training failed, retrying in %s hours", FAILED_TRAINING_RETRY_HOURS)
+            self.schedule_retraining(FAILED_TRAINING_RETRY_HOURS)
             return None
 
         if trained_model is None:
             logger.info("Not enough matched PV/weather history for training: %s", report)
             # Matched history grows by about one hour per hour of incoming data.
-            missing_hours = max(0, int(self.config.min_training_hours) - report["matched_hours"])
+            missing_hours = max(0, MIN_TRAINING_HOURS - report["matched_hours"])
             self.initial_phase_until = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=missing_hours)
-            self.schedule_retraining(float(self.config.failed_training_retry_hours))
+            self.schedule_retraining(FAILED_TRAINING_RETRY_HOURS)
             return None
 
-        self.schedule_retraining(float(self.config.retraining_interval_hours))
+        self.schedule_retraining(RETRAINING_INTERVAL_HOURS)
         return trained_model
 
     def need_retraining(self, model):
@@ -186,7 +209,7 @@ class Operator(MLOperator):
         batch_key = weather_time.isoformat()
         batch = self.weather_batches.setdefault(batch_key, [])
         batch.append(dict(data))
-        expected_size = int(self.config.forecast_batch_size)
+        expected_size = FORECAST_BATCH_SIZE
         if len(batch) < expected_size:
             return None, None, None
 
