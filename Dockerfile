@@ -13,4 +13,5 @@ RUN uv sync --locked --no-dev --no-install-project
 COPY . .
 RUN git log -1 --pretty=format:"commit=%H%ndate=%cd%n" > git_commit
 RUN apt-get purge -y git && apt-get auto-remove -y && apt-get clean && rm -rf .git
-CMD ["uv", "run", "--locked", "python", "-u", "main.py"]
+# uv run would otherwise install the dev group at start; Ray workers repeat this command line.
+CMD ["uv", "run", "--locked", "--no-dev", "python", "-u", "main.py"]

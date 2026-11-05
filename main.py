@@ -23,20 +23,18 @@ import mlflow
 import pandas as pd
 from mlflow import MlflowClient
 from operator_lib.operator_lib import OperatorLib
-from operator_lib.util import Config, Inputs, MLOperator, Outputs, Selector, logger
+from operator_lib.util import Config, Inputs, MLOperator, Outputs, Selector, clock, logger
 from operator_lib.util.helpers import provide_historic_data
 
+from algo.data import HOUR, WEATHER_VALUE_COLUMNS, as_utc, has_weather_values, lead_hours, period_start
 from algo.training import train_on_ray
 
 
 WEATHER_FIELDS = [
-    "instant_air_temperature",
-    "instant_relative_humidity",
-    "instant_ultraviolet_index_clear_sky",
-    "1_hours_precipitation_amount",
-    "instant_cloud_area_fraction",
-    "weather_time",
+    *WEATHER_VALUE_COLUMNS,
     "forecasted_for",
+    "issued_at",
+    "lead_days",
 ]
 
 
@@ -46,11 +44,13 @@ TRAINING_DURATION_DAYS = 90
 RETRAINING_INTERVAL_HOURS = 24
 FAILED_TRAINING_RETRY_HOURS = 6
 MIN_TRAINING_HOURS = 168
-# Must equal max_forecasts of import-yr-forecast.
-FORECAST_BATCH_SIZE = 48
+# Outputs for one hour are offset by this many microseconds minus the lead in
+# seconds, so a later forecast sorts after an earlier one, also across restarts.
+# Above the import's longest lead of 7 days and below one second.
+LEAD_OFFSET_SECONDS = 8 * 24 * 3600
 
-# Training sees one row per forecast vintage (up to 48 per hour), so the
-# previous 5000 trees would take hours per fit.
+# Training sees one row per forecast and lead, so the previous 5000 trees
+# would take hours per fit.
 ESTIMATOR_PARAMS = {
     "n_estimators": 500,
     "max_depth": 64,
@@ -69,19 +69,20 @@ class CustomConfig(Config):
 
 
 class PVInputs(Inputs):
-    # 1_hours_precipitation_amount is no identifier, so the fields are given as
-    # the annotations mapping instead of class annotations.
-    __annotations__ = {
-        "instant_air_temperature": float,
-        "instant_relative_humidity": float,
-        "instant_ultraviolet_index_clear_sky": int,
-        "1_hours_precipitation_amount": float,
-        "instant_cloud_area_fraction": float,
-        "weather_time": str,
-        "forecasted_for": str,
-        "energy_time": str,
-        "energy": float,
-    }
+    shortwave_radiation: float
+    direct_radiation: float
+    diffuse_radiation: float
+    direct_normal_irradiance: float
+    cloud_cover: float
+    temperature_2m: float
+    relative_humidity_2m: float
+    precipitation: float
+    wind_speed_10m: float
+    forecasted_for: str
+    issued_at: str
+    lead_days: int
+    energy_time: str
+    energy: float
 
 
 class ForecastOutputs(Outputs):
@@ -98,15 +99,15 @@ class Operator(MLOperator):
     selectors = [
         Selector({"name": "weather_func", "args": WEATHER_FIELDS}),
         Selector({"name": "power_func", "args": ["energy_time", "energy"]}),
+        # A PV device without its own time field; history then uses the stored time.
+        Selector({"name": "power_untimed_func", "args": ["energy"]}),
     ]
 
     def init(self, *args, **kwargs):
         # MLOperator.init may immediately call train(), so state used by train must
         # exist before calling it.
-        self.weather_batches = {}
         self.next_retraining_at = None
         self.initial_phase_until = None
-        self.output_sequence = 0
         super().init(*args, **kwargs)
 
         if self.next_retraining_at is None:
@@ -195,49 +196,47 @@ class Operator(MLOperator):
         return f"Die Anwendung befindet sich noch für ca. {hours} Stunden in der Initialisierungsphase"
 
     def infer(self, model, data, selector, device_id, timestamp):
-        if selector == "power_func":
+        if selector != "weather_func":
             # PV values are read from the historic platform source by train().
             return None, None, None
-        if selector != "weather_func":
+
+        frame = pd.DataFrame([dict(data)])
+        forecasted_for = as_utc(frame["forecasted_for"]).iloc[0] if "forecasted_for" in frame else pd.NaT
+        if pd.isna(forecasted_for):
+            logger.warning("Ignoring weather value with invalid forecasted_for")
+            return None, None, None
+        if not has_weather_values(frame).iloc[0]:
+            return None, None, None
+        # The prediction is the mean power of [start, start + 1 h).
+        start = period_start(frame["forecasted_for"]).iloc[0]
+        if start + HOUR <= clock.now():
             return None, None, None
 
-        weather_time = pd.to_datetime(data["weather_time"], utc=True, errors="coerce")
-        if pd.isna(weather_time):
-            logger.warning("Ignoring weather value with invalid weather_time")
-            return None, None, None
-
-        batch_key = weather_time.isoformat()
-        batch = self.weather_batches.setdefault(batch_key, [])
-        batch.append(dict(data))
-        expected_size = FORECAST_BATCH_SIZE
-        if len(batch) < expected_size:
-            return None, None, None
-
-        # Remove before prediction so a malformed batch cannot remain stuck.
-        forecast_rows = self.weather_batches.pop(batch_key)[:expected_size]
         if model is None:
             # Without a model there is no value, but consumers still learn why.
             logger.info("No production model available yet")
-            predictions = [None] * len(forecast_rows)
+            prediction = None
             initial_phase = self.initial_phase_message()
         else:
-            frame = pd.DataFrame(forecast_rows)
-            predictions = [float(max(0.0, value)) for value in model.predict(frame)]
+            prediction = float(max(0.0, model.predict(frame)[0]))
             initial_phase = ""
 
-        self.output_sequence += 1
-        result = []
-        for row, prediction in zip(forecast_rows, predictions):
-            target = pd.to_datetime(row["forecasted_for"], utc=True)
-            output_time = target + pd.Timedelta(self.output_sequence, unit="us")
-            result.append({
-                "timestamp": output_time.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
-                "output": prediction,
-                "initial_phase": initial_phase,
-            })
-        # operator-lib gives all results of a run one timestamp. None leaves the
-        # Kafka timestamp to the producer; the forecast time is in the payload.
-        return None, result, None
+        output_time = start + pd.Timedelta(microseconds=sequence_offset_us(lead_hours(frame).iloc[0]))
+        # None leaves the Kafka timestamp to the producer; the forecast hour, up to
+        # days ahead, is in the payload. A list, because the evaluation metric would
+        # score a single dict at the message time instead of the forecast hour.
+        return None, [{
+            "timestamp": output_time.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+            "output": prediction,
+            "initial_phase": initial_phase,
+        }], None
+
+
+def sequence_offset_us(lead):
+    """Microseconds added to the output time; larger for a shorter lead, 0 without one."""
+    if pd.isna(lead):
+        return 0
+    return min(999_999, max(0, LEAD_OFFSET_SECONDS - int(round(lead * 3600))))
 
 
 if __name__ == "__main__":

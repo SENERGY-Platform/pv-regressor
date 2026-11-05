@@ -1,32 +1,52 @@
 {
   "inputs": [
     {
-      "name": "instant_air_temperature",
+      "name": "shortwave_radiation",
       "type": "float"
     },
     {
-      "name": "instant_relative_humidity",
+      "name": "direct_radiation",
       "type": "float"
     },
     {
-      "name": "instant_ultraviolet_index_clear_sky",
-      "type": "int"
-    },
-    {
-      "name": "1_hours_precipitation_amount",
+      "name": "diffuse_radiation",
       "type": "float"
     },
     {
-      "name": "instant_cloud_area_fraction",
+      "name": "direct_normal_irradiance",
       "type": "float"
     },
     {
-      "name": "weather_time",
-      "type": "string"
+      "name": "cloud_cover",
+      "type": "float"
+    },
+    {
+      "name": "temperature_2m",
+      "type": "float"
+    },
+    {
+      "name": "relative_humidity_2m",
+      "type": "float"
+    },
+    {
+      "name": "precipitation",
+      "type": "float"
+    },
+    {
+      "name": "wind_speed_10m",
+      "type": "float"
     },
     {
       "name": "forecasted_for",
       "type": "string"
+    },
+    {
+      "name": "issued_at",
+      "type": "string"
+    },
+    {
+      "name": "lead_days",
+      "type": "int"
     },
     {
       "name": "energy_time",
