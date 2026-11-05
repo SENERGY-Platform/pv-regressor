@@ -4,6 +4,9 @@ LABEL org.opencontainers.image.source https://github.com/SENERGY-Platform/pv-reg
 WORKDIR /usr/src/app
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
+# Ray's uv hook pins Ray workers to this Python; without it, to the image's exact
+# patch release, which the Ray cluster need not have.
+ENV UV_PYTHON=3.10
 RUN apt-get update && apt-get install -y --no-install-recommends git
 COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --no-install-project
