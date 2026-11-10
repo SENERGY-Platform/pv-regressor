@@ -10,14 +10,28 @@ on:
       - 'release/v*'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/senergy-platform/pv-regressor-operator
+
 jobs:
-  multi:
+  # Settles the commit to build and its version. The manifest is regenerated here, so the
+  # commit can be a new one that the push did not contain; the build jobs check that one
+  # out. This is why the image is not built by docker/github-builder, which always builds
+  # the pushed commit.
+  prepare:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      sha: ${{ steps.head.outputs.sha }}
+      tag: ${{ steps.version.outputs.tag }}
+      tags: ${{ steps.tags.outputs.list }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Set up Python
@@ -38,6 +52,9 @@ jobs:
             git commit -m 'chore: regenerate the operator manifest [skip ci]'
             git push origin "HEAD:$GITHUB_REF_NAME"
           fi
+      - name: Commit to build
+        id: head
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Version
         id: version
         run: echo "tag=$(.github/scripts/next-version.sh "$GITHUB_REF_NAME")" >> "$GITHUB_OUTPUT"
@@ -46,38 +63,104 @@ jobs:
         run: |
           {
             echo 'list<<EOF'
-            echo "ghcr.io/senergy-platform/pv-regressor-operator:${{ steps.version.outputs.tag }}"
+            echo "$IMAGE:${{ steps.version.outputs.tag }}"
             if [ "$GITHUB_REF_NAME" = 'master' ]; then
-              echo 'ghcr.io/senergy-platform/pv-regressor-operator:prod'
+              echo "$IMAGE:prod"
             fi
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
+
+  # One native runner per platform, arm64 without QEMU. Each pushes its image by digest
+  # only; merge puts both under the tags. The Dockerfile reads the commit with git, so the
+  # checkout (with .git) is the build context.
+  build:
+    needs: [prepare]
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
       - name: Login to DockerHub
-        uses: docker/login-action@v1
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v1
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.CR_PAT }}
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v1
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
-      - name: Build and push
-        uses: docker/build-push-action@v2
+        uses: docker/setup-buildx-action@v3
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.tags.outputs.list }}
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+      - name: Export digest
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          digest='${{ steps.build.outputs.digest }}'
+          touch "$RUNNER_TEMP/digests/${digest#sha256:}"
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.runner }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digest-*
+          merge-multiple: true
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.CR_PAT }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Put both platforms under the tags
+        working-directory: ${{ runner.temp }}/digests
+        env:
+          TAGS: ${{ needs.prepare.outputs.tags }}
+        run: |
+          args=()
+          while read -r tag; do
+            [ -n "$tag" ] && args+=(--tag "$tag")
+          done <<< "$TAGS"
+          docker buildx imagetools create "${args[@]}" $(printf "$IMAGE@sha256:%s " *)
+          docker buildx imagetools inspect "$IMAGE:${{ needs.prepare.outputs.tag }}"
       - name: Push version tag
         run: |
-          tag='${{ steps.version.outputs.tag }}'
+          tag='${{ needs.prepare.outputs.tag }}'
           if [ -z "$(git tag --points-at HEAD --list "$tag")" ]; then
             git tag "$tag"
             git push origin "$tag"
